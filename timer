@@ -1,0 +1,83 @@
+var timers struct {
+	lock         mutex //锁，保护添加、删除timer
+	gp           *g //goroutine指针
+	created      bool
+	sleeping     bool
+	rescheduling bool
+	waitnote     note
+	t            []*timer //存储timer(小顶堆)
+}
+
+type timer struct {
+	i int // heap index
+
+	// Timer wakes up at when, and then at when+period, ... (period > 0 only)
+	// each time calling f(now, arg) in the timer goroutine, so f must be
+	// a well-behaved function and not block.
+	when   int64 //定时器超时时间
+	period int64
+	f      func(interface{}, uintptr) //超时后执行的方法
+	arg    interface{} //超时后执行方法参数
+	seq    uintptr
+}
+
+func timerproc() {
+	timers.gp = getg() //goroutine
+	for {
+		lock(&timers.lock) //锁
+		timers.sleeping = false
+		now := nanotime()
+		delta := int64(-1)
+		for {
+			if len(timers.t) == 0 {//没有timer
+				delta = -1
+				break
+			}
+			t := timers.t[0]
+			delta = t.when - now
+			if delta > 0 {//未超时
+				break
+			}
+			if t.period > 0 {
+				// leave in heap but adjust next time to fire
+				t.when += t.period * (1 + -delta/t.period)
+				siftdownTimer(0)
+			} else {
+				// remove from heap
+				last := len(timers.t) - 1
+				if last > 0 {
+					timers.t[0] = timers.t[last]
+					timers.t[0].i = 0
+				}
+				timers.t[last] = nil
+				timers.t = timers.t[:last]
+				if last > 0 {
+					siftdownTimer(0)
+				}
+				t.i = -1 // mark as removed
+			}
+			f := t.f
+			arg := t.arg
+			seq := t.seq
+			unlock(&timers.lock)
+			if raceenabled {
+				raceacquire(unsafe.Pointer(t))
+			}
+			f(arg, seq)
+			lock(&timers.lock)
+		}
+		//堆中没有timer，挂起goroutine，添加timer时会让它ready
+		if delta < 0 || faketime > 0 {
+			// No timers left - put goroutine to sleep.
+			timers.rescheduling = true
+			goparkunlock(&timers.lock, "timer goroutine (idle)", traceEvGoBlock, 1)
+			continue
+		}
+		//等待最近的timer超时，再执行上面循环检查，其实现依赖futex锁
+		// At least one timer pending.  Sleep until then.
+		timers.sleeping = true
+		noteclear(&timers.waitnote)
+		unlock(&timers.lock)
+		notetsleepg(&timers.waitnote, delta)
+	}
+}
