@@ -81,3 +81,33 @@ func timerproc() {
 		notetsleepg(&timers.waitnote, delta)
 	}
 }
+
+func addtimerLocked(t *timer) {
+	// when must never be negative; otherwise timerproc will overflow
+	// during its delta calculation and never expire other runtime·timers.
+	if t.when < 0 {
+		t.when = 1<<63 - 1
+	}
+	t.i = len(timers.t)
+	timers.t = append(timers.t, t) //添加timer
+	siftupTimer(t.i)
+	if t.i == 0 {
+		// 如果新添加的timer在堆顶，检查timers的sleeping和rescheduling两个状态，ready或者唤醒goroutine
+		// siftup moved to top: new earliest deadline.
+		if timers.sleeping {
+			timers.sleeping = false
+			notewakeup(&timers.waitnote)
+		}
+		if timers.rescheduling {
+			timers.rescheduling = false
+			goready(timers.gp, 0)
+		}
+	}
+	if !timers.created {
+		timers.created = true
+		go timerproc()
+	}
+}
+
+
+
