@@ -1422,15 +1422,15 @@ control the execution of any test:
 	    benchmarks should be executed.  The default is the current value
 	    of GOMAXPROCS.
 
-	-cpuprofile cpu.out
+	-cpuprofile cpu.out //输出cpu信息保存到文件
 	    Write a CPU profile to the specified file before exiting.
 	    Writes test binary as -c would.
 
-	-memprofile mem.out
+	-memprofile mem.out //输出内存分配信息保存到文件
 	    Write a memory profile to the file after all tests have passed.
 	    Writes test binary as -c would.
 
-	-memprofilerate n
+	-memprofilerate n //超过该参数的内存分配信息才被记录，默认512kb
 	    Enable more precise (and expensive) memory profiles by setting
 	    runtime.MemProfileRate.  See 'go doc runtime.MemProfileRate'.
 	    To profile all memory allocations, use -test.memprofilerate=1
